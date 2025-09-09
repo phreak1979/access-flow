@@ -370,8 +370,6 @@
 
       globalProgramId.set(foundProgram.id);
       programId = prgId;
-      console.warn("DEBUGPRINT[90]: +page.svelte:374: programId=", programId);
-      console.warn("DEBUGPRINT[90]: +page.svelte:374: programId=", typeof programId);
       await loadCourseProfile();
       const al = foundProgram?.accesslist;
 

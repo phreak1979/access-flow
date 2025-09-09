@@ -331,6 +331,8 @@
   $: programId = $globalProgramId;
 </script>
 
+<svelte:head><title>Access Flow | Profiles</title></svelte:head>
+
 <div class="container-fluid py-3">
   <div class="d-flex align-items-center justify-content-between mb-3">
     <h3 class="mb-0">Edit Course Profile</h3>
@@ -381,7 +383,6 @@
                 type="button"
                 class="btn btn-outline-primary position-relative"
                 on:click={() => {
-                  console.log("open modal click");
                   showNewModal = true;
                 }}
               >

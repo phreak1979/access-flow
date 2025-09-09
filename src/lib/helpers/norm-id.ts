@@ -15,6 +15,5 @@ export const normId = (raw: string): string => {
   if (type === "F") type = "FT";
   const num = m.groups.num ? String(parseInt(m.groups.num, 10)) : "";
 
-  console.log(`${month}${year}${type ? ` ${type}` : ""}${num ? ` - ${num}` : ""}`);
   return `${month}${year}${type ? ` ${type}` : ""}${num ? ` - ${num}` : ""}`;
 };

@@ -168,7 +168,6 @@
     loadAccessListandProfiles(programId);
   }
   async function loadAccessListandProfiles(prgId: Number) {
-    console.warn("DEBUGPRINT[78]: +page.svelte:172: prgId=", prgId);
     AccessLists = [];
     selectedAccessListId = "0";
     all = [];
@@ -176,12 +175,10 @@
     courseDict = {};
     classTotals = new Map();
     lastWeekByClassCourse = new Map();
-    console.warn("DEBUGPRINT[80]: +page.svelte:182: programId=", programId);
 
     if (!prgId) return;
 
     const p = programOptions.find((x) => x.id === prgId);
-    console.warn("DEBUGPRINT[81]: +page.svelte:185: p=", p);
 
     if (p?.accesslist?.id) {
       AccessLists = [
@@ -196,7 +193,6 @@
         },
       ];
       selectedAccessListId = p.accesslist.id;
-      console.warn("DEBUGPRINT[79]: +page.svelte:198: selectedAccessListId=", selectedAccessListId);
       await loadFileFromDirectus(selectedAccessListId, API_URL, TOKEN);
     }
 

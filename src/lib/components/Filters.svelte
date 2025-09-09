@@ -13,7 +13,6 @@
   const dispatch = createEventDispatcher();
 
   function emit() {
-    console.log("filter triigger");
     dispatch("change", {
       intake,
       mode,
@@ -33,16 +32,9 @@
 <div class="row">
   <div class="col-12">
     <label class="form-label mb-1" for="all-months">Intake month</label>
-    <select
-      class="form-select"
-      id="all-months"
-      bind:value={intake}
-      on:change={emit}
-    >
+    <select class="form-select" id="all-months" bind:value={intake} on:change={emit}>
       <option value="">All months</option>
-      <option>Jan</option><option>Mar</option><option>Aug</option><option
-        >Oct</option
-      >
+      <option>Jan</option><option>Mar</option><option>Aug</option><option>Oct</option>
     </select>
   </div>
 </div>
@@ -60,12 +52,7 @@
 <div class="row pt-1">
   <div class="col-12">
     <label class="form-label mb-1" for="class-name">Class</label>
-    <select
-      class="form-select"
-      id="class-name"
-      bind:value={classId}
-      on:change={emit}
-    >
+    <select class="form-select" id="class-name" bind:value={classId} on:change={emit}>
       <option value="">All</option>
       {#each classOptions as opt}
         <option value={opt}>{opt}</option>
@@ -76,32 +63,16 @@
   <div class="col-12">
     <label class="form-label mb-1" for="dates">Date</label>
     <div class="d-flex gap-2">
-      <input
-        class="form-control"
-        id="dates"
-        type="date"
-        bind:value={weekDate}
-        on:change={emit}
-      />
-      <button
-        class="btn btn-outline-secondary"
-        type="button"
-        aria-label="Info"
-        on:click={clearWeek}><i class="fa-solid fa-xmark text-info"></i></button
+      <input class="form-control" id="dates" type="date" bind:value={weekDate} on:change={emit} />
+      <button class="btn btn-outline-secondary" type="button" aria-label="Info" on:click={clearWeek}
+        ><i class="fa-solid fa-xmark text-info"></i></button
       >
     </div>
   </div>
   <div class="row pt-1">
     <div class="col-12">
-      <label class="form-label mb-1" for="course-code">Search course code</label
-      >
-      <input
-        class="form-control"
-        placeholder="e.g. PRF"
-        bind:value={courseQuery}
-        on:input={emit}
-        id="course-code"
-      />
+      <label class="form-label mb-1" for="course-code">Search course code</label>
+      <input class="form-control" placeholder="e.g. PRF" bind:value={courseQuery} on:input={emit} id="course-code" />
     </div>
   </div>
   <div class="row pt-1">
