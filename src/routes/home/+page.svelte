@@ -409,6 +409,7 @@
   // $: programId = $globalProgramId;
 </script>
 
+<svelte:head><title>Access Flow | Teacher Classes</title></svelte:head>
 <!-- <NewProfileModal bind:show={showUpload} /> -->
 <UploadExcelModal bind:show={showUpload} {programId} directusUrl={API_URL} token={TOKEN} on:updated={handleUpdated} />
 <div class="row">
