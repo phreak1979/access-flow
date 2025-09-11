@@ -1,0 +1,36 @@
+{
+  "Knowledge": [
+    "has knowledge of information technologies (IT), business intelligence, and the communication processes applied in the field of DevOps",
+    "has knowledge of installation, configuration, and troubleshooting of server operations within systems and technological environments",
+    "has knowledge of work processes involved in the installation, configuration, and administration of Linux servers",
+    "has knowledge of the design, scope, testing, and automation of cloud-based applications and the post deployment management within the field of DevOps",
+    "has knowledge of agile methodologies, lifecycle management, continuous integration, and pipeline automation within software development",
+    "has knowledge of scripting and programming for troubleshooting, testing, and automation.",
+    "has knowledge of IT infrastructures, virtualization, networking, and cloud infrastructure.",
+    "has knowledge of cloud specific technologies used within the field of DevOps",
+    "can assess their own work in relation to the conventional IT security, threat identification, triage, and monitoring.",
+    "can assess their own work in relation to the conventional coding practices, code standards, source code management and version control management (git)",
+    "is familiar with the history, heuristics and societal role of DevOps engineering.",
+    "has insight into his/her own opportunities for development with the field of DevOps engineering"
+  ],
+  "Skill": [
+    "can explain their vocational choices in planning, installing and configuring IT infrastructure.",
+    "can explain their vocational choices in designing, developing, and testing software system solutions.",
+    "can explain their vocational choices in setting up cloud management and identification tools",
+    "can explain their vocational choices in communicating technical commitments, reports, and user documentation.",
+    "can explain their vocational choices in communicating technical commitments, reports, and user documentation.",
+    "can explain their use of version control systems (git) for production code, continuous deployments, and branch management.",
+    "can reflect over their own vocational practice in performing system configuration, troubleshooting, development, and deployment of complete system solutions and adjust it under supervision",
+    "can reflect over their own vocational practice in utilizing and implementing automation tools and management systems and adjust it under supervision.",
+    "can find and refer to information and vocational material and assess its relevance for analyzing, structuring, and optimizing processes for application development",
+    "can find and refer to security protocols and assess every layer of the software development lifecycle."
+  ],
+  "Competence": [
+    "can plan and carry out continuous integration and test automation in software development projects alone or as part of a group and in accordance with ethical requirements and principles for agile methodologies.",
+    "can contribute to organisational development by implementing system solutions that meets the needs of an organization and user and in accordance with ethical requirements and principles within the field of DevOps engineering",
+    "can contribute to organisational development by optimizing programming solutions in the application development lifecycle",
+    "can plan and carry out all the necessary steps to facilitate the use of Continuous Integrations and Continuous Deployment (CI/CD) within the development pipeline",
+    "can plan and carry out proactive work alone or as part of a group to reduce IT security related risks in accordance with ethical requirements and principles",
+    "can exchange points of views with peer groups and others with a background in the field of DevOps engineering and participate in discussions about the development of good practice"
+  ]
+}
