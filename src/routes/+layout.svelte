@@ -35,6 +35,11 @@
           </a>
         </li>
         <li class="nav-item me-3">
+          <a class="nav-link {$page.url.pathname === '/planning' ? 'active' : ''}" href="/planning">
+            <i class="fa-solid fa-calendar"></i> Planner
+          </a>
+        </li>
+        <li class="nav-item me-3">
           <a class="nav-link {$page.url.pathname.startsWith('/profiles') ? 'active' : ''}" href="/profiles">
             <i class="fa-solid fa-user"></i> Profiles
           </a>
