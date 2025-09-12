@@ -1,25 +1,28 @@
 # ---- build stage ----
-FROM node:18 AS build
+FROM node:20-alpine AS build
 WORKDIR /app
 
-# copy package manifests and install deps
+# optional: declare build-time args for PUBLIC_ vars (no secrets!)
+ARG PUBLIC_API_URL
+ENV PUBLIC_API_URL=$PUBLIC_API_URL
+
 COPY package*.json ./
 RUN npm ci
-
-# copy source and build
 COPY . .
 RUN npm run build
 
 # ---- production stage ----
-FROM node:18-slim AS prod
+FROM node:20-alpine AS prod
 WORKDIR /app
 
-# copy only built output and runtime files
+# copy only what you need to run
 COPY --from=build /app/build ./build
 COPY --from=build /app/package*.json ./
 
-# install only production dependencies
+# install only runtime deps for the built server
+WORKDIR /app/build
 RUN npm ci --omit=dev
 
 EXPOSE 3000
-CMD ["node", "build/index.js"]
+ENV NODE_ENV=production
+CMD ["node", "index.js"]
