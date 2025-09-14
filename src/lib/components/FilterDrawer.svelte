@@ -38,11 +38,11 @@
       </button>
     </div>
 
-    <div class="row" hidden>
-      <div class="col-12">
-        <UploadArea on:loaded={onUploadLoaded} />
-      </div>
-    </div>
+    <!-- <div class="row"> -->
+    <!--   <div class="col-12"> -->
+    <!--     <UploadArea on:loaded={onUploadLoaded} /> -->
+    <!--   </div> -->
+    <!-- </div> -->
     <div class="card-body">
       <Filters
         bind:intake
@@ -108,7 +108,7 @@
     background: #272729; /* optional: match drawer bg */
   }
   /* Reveal drawer on hover OR when pinned open */
-  .drawer-wrap:hover .drawer,
+
   .drawer-wrap.is-open .drawer {
     transform: translateX(0);
   }

@@ -160,7 +160,6 @@
   async function loadCourseProfile(id: number) {
     if (!courseProfile) return;
     selected = courseProfile.find((x) => x.id == id);
-    console.warn("DEBUGPRINT[18]: +page.svelte:162: selected=", selected);
     if (!selected) return;
     courseSelected = selected.id;
 
@@ -339,10 +338,10 @@
   </div>
 
   <div class="row">
-    <div class="col-9">
+    <div class="col-12 col-md-9">
       <ClassPerTeacherChart {courseDict} bind:this={classesChart} />
     </div>
-    <div class="col-3">
+    <div class="col-12 col-md-3">
       <div class="card h-100">
         <div class="card-header">
           Course Options
