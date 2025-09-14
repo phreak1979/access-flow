@@ -23,7 +23,7 @@
   const togglePin = () => (pinned = !pinned);
 </script>
 
-<div class="drawer-wrap {pinned ? 'is-open shadow-lg' : ''} ">
+<div class="drawer-wrap {pinned ? 'is-open shadow-lg ' : ''} ">
   <aside class="drawer card shadow">
     <button class="handle btn btn-dark" type="button" aria-label="Filters" on:click={togglePin}>
       <div class="drawer-handle">
@@ -68,7 +68,7 @@
   /* Fixed container at the right edge of the viewport */
   .drawer-wrap {
     position: fixed;
-    top: 0;
+    top: 70px;
     right: 0;
     height: 100dvh;
     width: var(--filter-drawer-width);
