@@ -484,15 +484,15 @@
 
 <div class="row align-items-center mb-3">
   <div class="row align-items-stretch">
-    <div class="col-12 col-md-7">
+    <div class="col-12 col-sm-7">
       <TeacherLoadChart entries={filtered} {courseDict} {classTotals} title="Weekly load (filtered data)" />
     </div>
 
-    <div class="col-12 pt-5 col-md-2">
+    <div class="col-12 pt-5 col-sm-2">
       <StudentsTotalsChart {classTotals} title="Students per class" />
     </div>
 
-    <div class="col-12 pt-2 col-md-3">
+    <div class="col-12 pt-2 col-sm-3">
       <div class="card-header d-flex align-items-center justify-content-between">
         <!-- optional: any quick actions -->
       </div>
