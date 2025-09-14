@@ -25,7 +25,7 @@
 
 <div class="drawer-wrap {pinned ? 'is-open shadow-lg ' : ''} ">
   <aside class="drawer card shadow">
-    <button class="handle btn btn-dark" type="button" aria-label="Filters" on:click={togglePin}>
+    <button class="handle btn btn-dark" type="button" aria-label="Filters" on:click={togglePin} style="z-index:101">
       <div class="drawer-handle">
         <i class="fa-solid fa-filter"></i>
       </div>
@@ -64,7 +64,12 @@
     --handle-size: 32px;
     --handle-offset: 16px; /* how far the gear “sticks out” */
   }
-
+  .moveDrawertofront {
+    z-index: 9999;
+  }
+  .moveDrawerback {
+    z-index: 1;
+  }
   /* Fixed container at the right edge of the viewport */
   .drawer-wrap {
     position: fixed;
@@ -72,7 +77,7 @@
     right: 0;
     height: 100dvh;
     width: var(--filter-drawer-width);
-    z-index: 1050;
+    /* z-index: 1050; */
     pointer-events: none; /* page stays interactive when closed */
   }
 
@@ -114,7 +119,7 @@
   }
 
   /* Optional: on narrow screens, make it wider & rely on click-to-pin */
-  @media (max-width: 768px) {
+  @media (max-width: 200px) {
     :global(:root) {
       --filter-drawer-width: min(92vw, 420px);
     }
