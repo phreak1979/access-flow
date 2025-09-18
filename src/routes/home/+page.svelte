@@ -101,11 +101,12 @@
 
     let { data } = await res.json();
     courseProfile = data;
+
     if (courseProfile.length >= 1) {
       selectedProfile = courseProfile[0].id;
       setSelectedProfile(Number(selectedProfile));
     } else {
-      selectedProfile = 0;
+      selectedProfile = "0";
     }
   }
 
@@ -144,9 +145,7 @@
       if (Programs.length >= 1) {
         loadAccessListandProfiles(Programs[0].id);
       }
-    } catch (err) {
-      console.error("DEBUGPRINT[58]: +page.svelte:110: err=", err);
-    }
+    } catch (err) {}
   }
 
   function onLoaded(e: CustomEvent<{ entries: Entry[] }>) {
@@ -332,7 +331,10 @@
       applyFilters();
     } catch (err) {
       isLoading = true;
-
+      all = [];
+      entries = [];
+      buildTotals();
+      applyFilters();
       console.error("Error loading Directus file:", err);
     } finally {
       isLoading = false;
@@ -388,10 +390,10 @@
 
       await loadFileFromDirectus(selectedAccessListId, API_URL, TOKEN);
       const classSize: Totals | null | string = foundProgram.class;
-
-      loadClassTotals(classSize);
+      if (classSize) {
+        loadClassTotals(classSize);
+      }
     } catch (err) {
-      console.warn("DEBUGPRINT[70]: +page.svelte:407: err=", err);
     } finally {
       isLoading = false;
     }
@@ -404,7 +406,7 @@
   // $: programId = $globalProgramId;
 </script>
 
-<svelte:head><title>Access Flow | Teacher Classes</title></svelte:head>
+<svelte:head><title>Access Flow | Classes</title></svelte:head>
 <!-- <NewProfileModal bind:show={showUpload} /> -->
 <UploadExcelModal bind:show={showUpload} {programId} directusUrl={API_URL} token={TOKEN} on:updated={handleUpdated} />
 <div class="row">

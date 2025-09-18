@@ -420,7 +420,7 @@
   $: programId = $globalProgramId;
 </script>
 
-<svelte:head><title>Access Flow | Teacher Workload</title></svelte:head>
+<svelte:head><title>Access Flow | Workload</title></svelte:head>
 
 <main class="container-fluid pt-2">
   <!-- Header -->

@@ -2,7 +2,7 @@
   // ====== CONFIG ======
   import type { User } from "$lib/user";
   export let data: { API_URL: string; token: string; user: User };
-  export let baseUrl = "http://192.168.137.63:85";
+  export let baseUrl = data.API_URL;
   export let token: string = data.token;
   export let programId: number = 4;
 
@@ -18,18 +18,29 @@
   };
 
   type RawLOS = Record<string, any> | null;
-  type LOSBuckets = Record<NormCat, string[]>;
   type LOSKeyNames = { knowledgeKey: string; skillKey: string; competenceKey: string };
+
+  type LoObj = { id: string; text: string };
+  type LosBucketsObj = Record<NormCat, LoObj[]>; // course.los
+  type LosBucketsIds = Record<NormCat, string[]>; // lesson.los
 
   // API rows
   type ProgramRow = { id: number; los: RawLOS };
-  type CourseRow = { id: number; los: RawLOS; name: string; order?: number | null };
+  type CourseRow = {
+    id: number;
+    los: RawLOS; // { knowledge:[{id,text}], skill:[{id,text}], competence:[{id,text}] }
+    name: string;
+    order?: number | null;
+    ca_weeks: number;
+    about_the_course: string | null;
+    content_weeks: number;
+  };
   type LessonRow = {
     id: number;
     name: string;
     topics?: string | null;
     module: number;
-    los: RawLOS;
+    los: RawLOS; // { knowledge:["K-1"], skill:["S-2"], competence:[] }
   };
   type ModuleRow = {
     id: number;
@@ -42,13 +53,13 @@
 
   // UI models
   type PLO = { text: string; normCat: NormCat };
-  type CLO = { text: string; normCat: NormCat };
+  type CLO = { id: string; text: string; normCat: NormCat }; // now has id
   type Lesson = {
     id: number;
     title: string;
     topics?: string | null;
     moduleId: number;
-    los: CLO[];
+    los: CLO[]; // UI objects (resolved from ids)
     losKeys: LOSKeyNames; // preserve keys for PATCH
   };
   type Module = {
@@ -59,20 +70,29 @@
     order?: number | null;
     lessons: Lesson[];
   };
-  type Course = { id: number; name: string; order?: number | null };
+  type Course = {
+    id: number;
+    name: string;
+    order?: number | null;
+    about_the_course: string | null;
+    content_weeks: number;
+    ca_weeks: number;
+  };
 
   // ====== State ======
   let loading = false;
   let errorMsg: string | null = null;
 
   let programPlos: PLO[] = [];
-
+  let overview_about_the_course: string | null;
   let courses: Course[] = [];
   let selectedCourseId: number | null = null;
-
+  let content_weeks: number = 0;
+  let ca_weeks: number = 0;
   let modules: Module[] = [];
   let lessons: Lesson[] = []; // flattened
   let courseClos: CLO[] = [];
+  let cloById = new Map<string, CLO>(); // id -> CLO
 
   // Remember exact LOS keys for the selected course (for PATCH)
   let courseLosKeyNames: LOSKeyNames = {
@@ -90,12 +110,6 @@
     return String(e);
   }
 
-  function coerceStrArray(v: any): string[] {
-    if (!v) return [];
-    const arr = Array.isArray(v) ? v : [v];
-    return arr.map(String).filter((s) => s != null && s !== "");
-  }
-
   function pickExistingKey(obj: any, logical: "knowledge" | "skill" | "competence", fallback: string) {
     if (obj && typeof obj === "object") {
       const hit = Object.keys(obj).find((k) => k.toLowerCase() === logical);
@@ -103,8 +117,15 @@
     }
     return fallback;
   }
-  // READ: flex normalize (case-insensitive)
-  function normalizeLOSFlexible(raw: RawLOS): LOSBuckets {
+
+  // Program PLOs still plain strings (unchanged)
+  function coerceStrArray(v: any): string[] {
+    if (!v) return [];
+    const arr = Array.isArray(v) ? v : [v];
+    return arr.map(String).filter((s) => s != null && s !== "");
+  }
+
+  function normalizeLOSFlexible(raw: RawLOS): Record<NormCat, string[]> {
     const obj = raw || {};
     const lower: Record<string, any> = {};
     for (const k of Object.keys(obj)) lower[k.toLowerCase()] = obj[k];
@@ -114,41 +135,69 @@
       GENERAL_COMPETENCE: coerceStrArray(lower["competence"]),
     };
   }
-  // READ + remember keys
-  function normalizeLOSWithKeys(raw: RawLOS): { buckets: LOSBuckets; keys: LOSKeyNames } {
-    const obj = raw || {};
-    const knowledgeKey = pickExistingKey(obj, "knowledge", "knowledge");
-    const skillKey = pickExistingKey(obj, "skill", "skill");
-    const competenceKey = pickExistingKey(obj, "competence", "competence");
-    const buckets: LOSBuckets = {
-      KNOWLEDGE: coerceStrArray(obj?.[knowledgeKey]),
-      SKILL: coerceStrArray(obj?.[skillKey]),
-      GENERAL_COMPETENCE: coerceStrArray(obj?.[competenceKey]),
-    };
-    return { buckets, keys: { knowledgeKey, skillKey, competenceKey } };
-  }
 
-  function entriesFromLOS(los: LOSBuckets): CLO[] {
-    const out: CLO[] = [];
+  function entriesFromLOS(los: Record<NormCat, string[]>): PLO[] {
+    const out: PLO[] = [];
     for (const cat of CAT_ORDER) for (const t of los[cat]) out.push({ text: t, normCat: cat });
     return out;
   }
 
-  function groupBy<T, K>(arr: T[], key: (x: T) => K): Map<K, T[]> {
-    const m = new Map<K, T[]>();
-    for (const item of arr) {
-      const k = key(item);
-      (m.get(k) || m.set(k, [] as T[]).get(k)!).push(item);
-    }
-    return m;
+  // ====== NEW: Course/lesson LOS helpers (ID-based) ======
+  function normalizeCourseLOSWithKeys(raw: RawLOS): { buckets: LosBucketsObj; keys: LOSKeyNames } {
+    const obj = raw || {};
+    const knowledgeKey = pickExistingKey(obj, "knowledge", "knowledge");
+    const skillKey = pickExistingKey(obj, "skill", "skill");
+    const competenceKey = pickExistingKey(obj, "competence", "competence");
+
+    const toObjs = (v: any): LoObj[] =>
+      (Array.isArray(v) ? v : []).map((o) => ({ id: String(o.id), text: String(o.text) }));
+
+    return {
+      buckets: {
+        KNOWLEDGE: toObjs((obj as any)[knowledgeKey]),
+        SKILL: toObjs((obj as any)[skillKey]),
+        GENERAL_COMPETENCE: toObjs((obj as any)[competenceKey]),
+      },
+      keys: { knowledgeKey, skillKey, competenceKey },
+    };
+  }
+
+  function parseLessonIds(raw: RawLOS, keys: LOSKeyNames): LosBucketsIds {
+    const toIds = (v: any): string[] => (Array.isArray(v) ? v.map(String) : []);
+    return {
+      KNOWLEDGE: toIds((raw as any)?.[keys.knowledgeKey]),
+      SKILL: toIds((raw as any)?.[keys.skillKey]),
+      GENERAL_COMPETENCE: toIds((raw as any)?.[keys.competenceKey]),
+    };
+  }
+
+  function entriesFromCourse(b: LosBucketsObj): CLO[] {
+    const out: CLO[] = [];
+    for (const cat of CAT_ORDER) for (const o of b[cat]) out.push({ id: o.id, text: o.text, normCat: cat });
+    return out;
+  }
+
+  function lessonLosToUi(b: LosBucketsIds): CLO[] {
+    const out: CLO[] = [];
+    for (const cat of CAT_ORDER)
+      for (const id of b[cat]) {
+        const clo = cloById.get(id);
+        if (clo) out.push(clo);
+      }
+    return out;
+  }
+
+  function toIdsByCat(arr: CLO[]): LosBucketsIds {
+    return {
+      KNOWLEDGE: arr.filter((a) => a.normCat === "KNOWLEDGE").map((a) => a.id),
+      SKILL: arr.filter((a) => a.normCat === "SKILL").map((a) => a.id),
+      GENERAL_COMPETENCE: arr.filter((a) => a.normCat === "GENERAL_COMPETENCE").map((a) => a.id),
+    };
   }
 
   function selectedCourseName(): string {
     const c = courses.find((x) => x.id === selectedCourseId);
     return c?.name ?? String(selectedCourseId ?? "");
-  }
-  function cloKey(o: CLO) {
-    return `${o.normCat}::${o.text}`;
   }
 
   // ====== Fetcher ======
@@ -178,10 +227,17 @@
 
   async function loadCoursesForProgram() {
     const res = await fetchJson<ApiList<CourseRow>>(
-      `/items/courses?fields=id,los,name,order&sort=order&filter[program]=${programId}`,
+      `/items/courses?fields=id,los,name,order,about_the_course,ca_weeks,content_weeks&sort=order&filter[program]=${programId}`,
     );
     courses = (res.data || [])
-      .map((c) => ({ id: c.id, name: c.name, order: c.order ?? null }))
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        order: c.order ?? null,
+        about_the_course: c.about_the_course ?? null,
+        ca_weeks: c.ca_weeks,
+        content_weeks: c.content_weeks,
+      }))
       .sort((a, b) => {
         const ao = a.order ?? Number.POSITIVE_INFINITY;
         const bo = b.order ?? Number.POSITIVE_INFINITY;
@@ -189,22 +245,37 @@
         return a.id - b.id;
       });
 
-    if (courses.length >= 1) {
+    // Keep selection stable if possible; fall back to first course.
+    if (selectedCourseId && courses.some((c) => c.id === selectedCourseId)) {
+      // keep current
+    } else if (courses.length >= 1) {
       selectedCourseId = courses[0].id;
-      selectCourseByID(selectedCourseId);
+      await selectCourseByID(selectedCourseId);
+    } else {
+      selectedCourseId = null;
+      modules = [];
+      lessons = [];
+      courseClos = [];
+      cloById.clear();
     }
   }
 
   async function loadCourseClos(courseId: number) {
     const res = await fetchJson<ApiList<CourseRow>>(
-      `/items/courses?fields=id,los,name&filter[id][_eq]=${courseId}&filter[program]=${programId}`,
+      `/items/courses?fields=id,los,name,about_the_course,content_weeks,ca_weeks&filter[id][_eq]=${courseId}&filter[program]=${programId}`,
     );
     const row = (res.data || [])[0];
-    const { buckets, keys } = normalizeLOSWithKeys(row?.los ?? null);
+    overview_about_the_course = row.about_the_course;
+    content_weeks = row.content_weeks;
+    ca_weeks = row.ca_weeks;
+
+    const { buckets, keys } = normalizeCourseLOSWithKeys(row?.los ?? null);
     courseLosKeyNames = keys;
-    courseClos = entriesFromLOS(buckets).sort((a, b) =>
+
+    courseClos = entriesFromCourse(buckets).sort((a, b) =>
       a.normCat === b.normCat ? a.text.localeCompare(b.text) : a.normCat.localeCompare(b.normCat),
     );
+    cloById = new Map(courseClos.map((c) => [c.id, c]));
   }
 
   async function loadModulesAndLessons(courseId: number) {
@@ -218,13 +289,20 @@
       title: m.title ?? null,
       order: m.order ?? null,
       lessons: (m.lessons || []).map((l) => {
-        const { buckets, keys } = normalizeLOSWithKeys(l.los ?? null);
+        const knowledgeKey = pickExistingKey(l.los ?? {}, "knowledge", "knowledge");
+        const skillKey = pickExistingKey(l.los ?? {}, "skill", "skill");
+        const competenceKey = pickExistingKey(l.los ?? {}, "competence", "competence");
+        const keys: LOSKeyNames = { knowledgeKey, skillKey, competenceKey };
+
+        const ids = parseLessonIds(l.los ?? null, keys);
+        const ui = lessonLosToUi(ids);
+
         return {
           id: l.id,
           title: l.name,
           topics: l.topics ?? null,
           moduleId: m.id,
-          los: entriesFromLOS(buckets),
+          los: ui,
           losKeys: keys,
         };
       }),
@@ -235,18 +313,15 @@
   // ====== Derivations ======
   $: byCatPLO = groupBy(programPlos, (o) => o.normCat);
   $: countByCatPLO = new Map<NormCat, number>(CAT_ORDER.map((c) => [c, (byCatPLO.get(c) || []).length]));
-
   $: byCatCLO = groupBy(courseClos, (o) => o.normCat);
   $: countByCatCLO = new Map<NormCat, number>(CAT_ORDER.map((c) => [c, (byCatCLO.get(c) || []).length]));
-
-  $: usedCloKeySet = new Set(lessons.flatMap((l) => l.los.map(cloKey)));
+  // Used/unassigned by ID (not text)
+  $: usedCloIdSet = new Set(lessons.flatMap((l) => l.los.map((o) => o.id)));
   $: unassignedCountByCatCLO = new Map<NormCat, number>(
-    CAT_ORDER.map((c) => [c, (byCatCLO.get(c) || []).filter((o) => !usedCloKeySet.has(cloKey(o))).length]),
+    CAT_ORDER.map((c) => [c, (byCatCLO.get(c) || []).filter((o) => !usedCloIdSet.has(o.id)).length]),
   );
-  $: totalUnassignedCLO = courseClos.filter((o) => !usedCloKeySet.has(cloKey(o))).length;
-
+  $: totalUnassignedCLO = courseClos.filter((o) => !usedCloIdSet.has(o.id)).length;
   $: lessonsByModule = groupBy(lessons, (l) => l.moduleId);
-
   $: moduleLos = new Map<number, CLO[]>();
   $: {
     moduleLos.clear();
@@ -254,8 +329,7 @@
       const uniq = new Map<string, CLO>();
       for (const le of arr)
         for (const lo of le.los) {
-          const k = cloKey(lo);
-          if (!uniq.has(k)) uniq.set(k, lo);
+          if (!uniq.has(lo.id)) uniq.set(lo.id, lo);
         }
       moduleLos.set(mid, Array.from(uniq.values()));
     }
@@ -271,6 +345,26 @@
   function moduleHeading(m: Module) {
     const base = m.title ?? m.name ?? `Module ${m.id}`;
     return m.order != null ? `Module ${m.order} — ${base}` : base;
+  }
+
+  // ====== Course LOS mutate (object arrays) ======
+  async function mutateCourseLosObjects(mutator: (b: LosBucketsObj) => void) {
+    const res = await fetchJson<ApiList<CourseRow>>(
+      `/items/courses?fields=id,los&filter[id][_eq]=${selectedCourseId}&filter[program]=${programId}`,
+    );
+    const row = (res.data || [])[0] ?? { los: null };
+    const { buckets, keys } = normalizeCourseLOSWithKeys(row.los ?? null);
+
+    mutator(buckets);
+
+    const payload = {
+      los: {
+        [keys.knowledgeKey]: buckets.KNOWLEDGE,
+        [keys.skillKey]: buckets.SKILL,
+        [keys.competenceKey]: buckets.GENERAL_COMPETENCE,
+      },
+    };
+    await fetchJson(`/items/courses/${selectedCourseId}`, { method: "PATCH", body: JSON.stringify(payload) });
   }
 
   // ====== CLO: add / edit / delete ======
@@ -296,26 +390,6 @@
     showAddCloModal = true;
   }
 
-  // shared helper: fetch current course row, get buckets+keys, let mutator change buckets, then PATCH
-  async function mutateCourseLos(mutator: (b: LOSBuckets) => void) {
-    const res = await fetchJson<ApiList<CourseRow>>(
-      `/items/courses?fields=id,los&filter[id][_eq]=${selectedCourseId}&filter[program]=${programId}`,
-    );
-    const row = (res.data || [])[0] ?? { los: null };
-    const { buckets, keys } = normalizeLOSWithKeys(row.los ?? null);
-
-    mutator(buckets);
-
-    const payload = {
-      los: {
-        [keys.knowledgeKey]: buckets.KNOWLEDGE,
-        [keys.skillKey]: buckets.SKILL,
-        [keys.competenceKey]: buckets.GENERAL_COMPETENCE,
-      },
-    };
-    await fetchJson(`/items/courses/${selectedCourseId}`, { method: "PATCH", body: JSON.stringify(payload) });
-  }
-
   async function saveClo() {
     if (!cloName.trim()) {
       cloError = "Please enter an outcome description.";
@@ -329,29 +403,34 @@
     cloError = null;
     try {
       if (editingClo) {
-        // EDIT: remove old (by exact text+cat), then add new (maybe same cat)
+        // EDIT text and/or move category; keep the same id
         const original = editingClo;
-        await mutateCourseLos((b) => {
-          const removeFrom =
+        await mutateCourseLosObjects((b) => {
+          // remove from original bucket by id
+          const from =
             original.normCat === "KNOWLEDGE"
               ? b.KNOWLEDGE
               : original.normCat === "SKILL"
                 ? b.SKILL
                 : b.GENERAL_COMPETENCE;
-          const idx = removeFrom.findIndex((t) => t.trim() === original.text.trim());
-          if (idx !== -1) removeFrom.splice(idx, 1);
+          const idx = from.findIndex((o) => o.id === original.id);
+          if (idx !== -1) from.splice(idx, 1);
 
-          const toAdd = cloName.trim();
-          const addTo = cloCat === "KNOWLEDGE" ? b.KNOWLEDGE : cloCat === "SKILL" ? b.SKILL : b.GENERAL_COMPETENCE;
+          // add/update in target bucket (keep id)
+          const target = cloCat === "KNOWLEDGE" ? b.KNOWLEDGE : cloCat === "SKILL" ? b.SKILL : b.GENERAL_COMPETENCE;
 
-          if (!addTo.some((t) => t.trim() === toAdd)) addTo.push(toAdd);
+          // avoid duplicates by id (shouldn’t happen, but safe)
+          const existingIdx = target.findIndex((o) => o.id === original.id);
+          const updated = { id: original.id, text: cloName.trim() };
+          if (existingIdx !== -1) target[existingIdx] = updated;
+          else target.push(updated);
         });
       } else {
-        // ADD
-        await mutateCourseLos((b) => {
-          const toAdd = cloName.trim();
-          const list = cloCat === "KNOWLEDGE" ? b.KNOWLEDGE : cloCat === "SKILL" ? b.SKILL : b.GENERAL_COMPETENCE;
-          if (!list.some((t) => t.trim() === toAdd)) list.push(toAdd);
+        // ADD new object with fresh id
+        const newId = `${cloCat[0]}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+        await mutateCourseLosObjects((b) => {
+          const bucket = cloCat === "KNOWLEDGE" ? b.KNOWLEDGE : cloCat === "SKILL" ? b.SKILL : b.GENERAL_COMPETENCE;
+          bucket.push({ id: newId, text: cloName.trim() });
         });
       }
 
@@ -370,10 +449,10 @@
     const ok = confirm(`Delete this course outcome?\n\n[${CAT_LABEL[clo.normCat]}] ${clo.text}`);
     if (!ok) return;
     try {
-      await mutateCourseLos((b) => {
+      await mutateCourseLosObjects((b) => {
         const bucket =
           clo.normCat === "KNOWLEDGE" ? b.KNOWLEDGE : clo.normCat === "SKILL" ? b.SKILL : b.GENERAL_COMPETENCE;
-        const idx = bucket.findIndex((t) => t.trim() === clo.text.trim());
+        const idx = bucket.findIndex((o) => o.id === clo.id);
         if (idx !== -1) bucket.splice(idx, 1);
       });
       await loadCourseClos(selectedCourseId);
@@ -535,9 +614,9 @@
     }
   }
 
-  // ====== DnD: attach/remove LOs on lessons ======
+  // ====== DnD: attach/remove LOs on lessons (IDs) ======
   function onCloDragStart(e: DragEvent, clo: CLO) {
-    e.dataTransfer?.setData("application/json", JSON.stringify({ normCat: clo.normCat, text: clo.text }));
+    e.dataTransfer?.setData("application/json", JSON.stringify({ id: clo.id }));
     e.dataTransfer!.effectAllowed = "copy";
   }
   function onLessonDragOver(e: DragEvent) {
@@ -549,30 +628,24 @@
     try {
       const raw = e.dataTransfer?.getData("application/json");
       if (!raw) return;
-      const dropped: CLO = JSON.parse(raw);
-      await addLoToLesson(l, dropped);
+      const dropped = JSON.parse(raw) as { id: string };
+      const clo = cloById.get(dropped.id);
+      if (!clo) return;
+      await addLoToLesson(l, clo);
     } catch (err) {
       alert(getErrMessage(err));
     }
   }
 
-  function toBucketsFromCLOs(arr: CLO[]): LOSBuckets {
-    return {
-      KNOWLEDGE: arr.filter((a) => a.normCat === "KNOWLEDGE").map((a) => a.text),
-      SKILL: arr.filter((a) => a.normCat === "SKILL").map((a) => a.text),
-      GENERAL_COMPETENCE: arr.filter((a) => a.normCat === "GENERAL_COMPETENCE").map((a) => a.text),
-    };
-  }
-
   async function addLoToLesson(l: Lesson, clo: CLO) {
-    if (l.los.some((x) => x.normCat === clo.normCat && x.text === clo.text)) return; // already present
+    if (l.los.some((x) => x.id === clo.id)) return; // already present
     const next = [...l.los, clo];
-    const buckets = toBucketsFromCLOs(next);
+    const ids = toIdsByCat(next);
     const payload = {
       los: {
-        [l.losKeys.knowledgeKey]: buckets.KNOWLEDGE,
-        [l.losKeys.skillKey]: buckets.SKILL,
-        [l.losKeys.competenceKey]: buckets.GENERAL_COMPETENCE,
+        [l.losKeys.knowledgeKey]: ids.KNOWLEDGE,
+        [l.losKeys.skillKey]: ids.SKILL,
+        [l.losKeys.competenceKey]: ids.GENERAL_COMPETENCE,
       },
     };
     await fetchJson(`/items/lessons/${l.id}`, { method: "PATCH", body: JSON.stringify(payload) });
@@ -580,13 +653,13 @@
   }
 
   async function removeLoFromLesson(l: Lesson, clo: CLO) {
-    const next = l.los.filter((x) => !(x.normCat === clo.normCat && x.text === clo.text));
-    const buckets = toBucketsFromCLOs(next);
+    const next = l.los.filter((x) => x.id !== clo.id);
+    const ids = toIdsByCat(next);
     const payload = {
       los: {
-        [l.losKeys.knowledgeKey]: buckets.KNOWLEDGE,
-        [l.losKeys.skillKey]: buckets.SKILL,
-        [l.losKeys.competenceKey]: buckets.GENERAL_COMPETENCE,
+        [l.losKeys.knowledgeKey]: ids.KNOWLEDGE,
+        [l.losKeys.skillKey]: ids.SKILL,
+        [l.losKeys.competenceKey]: ids.GENERAL_COMPETENCE,
       },
     };
     await fetchJson(`/items/lessons/${l.id}`, { method: "PATCH", body: JSON.stringify(payload) });
@@ -613,6 +686,109 @@
     }
   }
 
+  // ====== Courses: manager (add / edit / delete) ======
+  let showCourseManager = false;
+
+  let showAddCourseModal = false;
+  let courseSaving = false;
+  let courseError: string | null = null;
+  let courseName = "";
+  let about_the_course: string | null = null;
+  let courseOrder: number | null = null;
+  let editingCourse: Course | null = null;
+
+  function openCourseManager() {
+    courseError = null;
+    showCourseManager = true;
+  }
+
+  function openAddCourseModal() {
+    editingCourse = null;
+    courseName = "";
+    about_the_course = "";
+    courseOrder = null;
+    courseError = null;
+    showAddCourseModal = true;
+  }
+
+  function openEditCourseModal(c: Course) {
+    editingCourse = c;
+    courseName = c.name;
+    about_the_course = c.about_the_course ?? null;
+    courseOrder = c.order ?? null;
+    courseError = null;
+    showAddCourseModal = true;
+  }
+
+  async function saveCourse() {
+    if (!courseName.trim()) {
+      courseError = "Please enter a course name.";
+      return;
+    }
+    courseSaving = true;
+    courseError = null;
+    try {
+      if (editingCourse) {
+        const payload: any = { name: courseName.trim(), about_the_course: about_the_course };
+        payload.order = courseOrder != null && !Number.isNaN(courseOrder) ? courseOrder : null;
+        await fetchJson(`/items/courses/${editingCourse.id}`, {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        });
+      } else {
+        const payload: any = {
+          name: courseName.trim(),
+          program: programId,
+        };
+        if (courseOrder != null && !Number.isNaN(courseOrder)) payload.order = courseOrder;
+        await fetchJson(`/items/courses`, { method: "POST", body: JSON.stringify(payload) });
+      }
+
+      // Refresh list & keep/adjust selection
+      const prevSelected = selectedCourseId;
+      await loadCoursesForProgram();
+
+      if (prevSelected && courses.some((c) => c.id === prevSelected)) {
+        // keep selection and reload its data
+        await selectCourseByID(prevSelected);
+      } else if (selectedCourseId) {
+        await selectCourseByID(selectedCourseId);
+      }
+
+      showAddCourseModal = false;
+      editingCourse = null;
+    } catch (e) {
+      courseError = getErrMessage(e);
+    } finally {
+      courseSaving = false;
+    }
+  }
+
+  async function deleteCourse(c: Course) {
+    const ok = confirm(`Delete course "${c.name}" (ID ${c.id})?\nThis cannot be undone.`);
+    if (!ok) return;
+    try {
+      await fetchJson(`/items/courses/${c.id}`, { method: "DELETE" });
+
+      const wasSelected = selectedCourseId === c.id;
+      await loadCoursesForProgram();
+
+      if (wasSelected) {
+        if (selectedCourseId) {
+          await selectCourseByID(selectedCourseId);
+        } else {
+          // No courses left
+          modules = [];
+          lessons = [];
+          courseClos = [];
+          cloById.clear();
+        }
+      }
+    } catch (e) {
+      alert(getErrMessage(e));
+    }
+  }
+
   // ====== Tabs ======
   let activeTabPLO: NormCat = "KNOWLEDGE";
   let activeTabCLO: NormCat = "KNOWLEDGE";
@@ -628,64 +804,107 @@
       loading = false;
     }
   })();
+
+  // tiny util used above
+  function groupBy<T, K>(arr: T[], key: (x: T) => K): Map<K, T[]> {
+    const m = new Map<K, T[]>();
+    for (const item of arr) {
+      const k = key(item);
+      (m.get(k) || m.set(k, [] as T[]).get(k)!).push(item);
+    }
+    return m;
+  }
 </script>
 
-<div class="container py-4">
-  <div class="d-flex align-items-center justify-content-between mb-3">
-    <h1 class="h4 mb-0">Study Plan Planner</h1>
-    <div class="d-flex gap-2">
-      <button class="btn btn-sm btn-outline-secondary" disabled title="Program LOs come from program.los">
-        + Program Outcome
-      </button>
-      {#if selectedCourseId}
-        <button class="btn btn-sm btn-outline-primary" on:click={openAddCloModal}>+ Course Outcome</button>
-        <button class="btn btn-sm btn-outline-success" on:click={openAddModuleModal}>+ Module</button>
-      {/if}
+<svelte:head><title>Access Flow | Planner</title></svelte:head>
+
+<!-- Header -->
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <h1 class="h4 mb-0">Study Plan Planner</h1>
+  <div class="d-flex gap-2">
+    {#if selectedCourseId}
+      <button class="btn btn-sm btn-outline-primary" on:click={openAddCloModal}>+ Course Outcome</button>
+      <button class="btn btn-sm btn-outline-success" on:click={openAddModuleModal}>+ Module</button>
+    {/if}
+  </div>
+</div>
+
+{#if errorMsg}<div class="alert alert-danger">{errorMsg}</div>{/if}
+
+<div class="row pb-5">
+  <div class="col-12">
+    <!-- Course selector + manager -->
+    <div class="mb-3 d-flex gap-2 align-items-end">
+      <div class="flex-grow-1">
+        <label class="form-label" for="course-select">Course</label>
+        <select class="form-select" id="course-select" on:change={onSelectCourse} bind:value={selectedCourseId}>
+          <option value={0}>Select a course…</option>
+          {#each courses as c}
+            <option value={c.id}>
+              {c.order != null ? `${c.order}. ` : ""}{c.name}
+            </option>
+          {/each}
+        </select>
+      </div>
+
+      <div>
+        <button class="btn btn-outline-warning" on:click={openCourseManager}>
+          <i class="fa-solid fa-gear me-1"></i> Manage courses
+        </button>
+      </div>
+    </div>
+  </div>
+  <div class="col-9">
+    <div class="card mb-4 h-100">
+      <div class="card-header d-flex align-items-center justify-content-between">About the course</div>
+      <div class="card-body">
+        {overview_about_the_course}
+      </div>
     </div>
   </div>
 
-  {#if errorMsg}<div class="alert alert-danger">{errorMsg}</div>{/if}
-
-  <!-- Course selector -->
-  <div class="mb-3">
-    <label class="form-label">Course</label>
-    <select class="form-select" on:change={onSelectCourse} bind:value={selectedCourseId}>
-      <option value={0}>Select a course…</option>
-      {#each courses as c}
-        <option value={c.id}>
-          {c.order != null ? `${c.order}. ` : ""}{c.name}
-        </option>
-      {/each}
-    </select>
+  <div class="col-3">
+    <div class="card mb-4 h-100">
+      <div class="card-header d-flex align-items-center justify-content-between">Course information</div>
+      <div class="card-body">
+        <p>Course content weeks: <span class="text-info">{content_weeks}</span></p>
+        <p>Course assignemnt weeks: <span class="text-info">{ca_weeks}</span></p>
+        <p>Total course weeks: <span class="text-info">{content_weeks + ca_weeks}</span></p>
+      </div>
+    </div>
   </div>
+</div>
 
+<div class="row">
   {#if selectedCourseId}
-    <!-- Course Outcomes (Tabbed, with unassigned indicators + row actions) -->
-    <div class="card mb-4">
-      <div class="card-header d-flex align-items-center justify-content-between">
-        <strong>Course Learning Outcomes</strong>
-        <div class="d-flex align-items-center gap-2">
-          {#if totalUnassignedCLO != 0}
-            <span class="badge text-bg-warning" title="CLOs not used by any lesson"
-              >Unassigned:<i class="fa-solid fa-triangle-exclamation"></i> {totalUnassignedCLO}</span
-            >
-          {/if}
-          <div class="btn-group btn-group-sm" role="tablist" aria-label="CLO categories">
-            {#each CAT_ORDER as cat}
-              <button
-                type="button"
-                class={"btn " + (activeTabCLO === cat ? "btn-primary" : "btn-outline-primary")}
-                aria-selected={activeTabCLO === cat}
-                aria-controls={`clo-tab-${cat}`}
-                on:click={() => (activeTabCLO = cat)}
+    <div class="col-6">
+      <!-- Course Outcomes -->
+      <div class="card mb-4">
+        <div class="card-header d-flex align-items-center justify-content-between">
+          <strong>Course Learning Outcomes</strong>
+          <div class="d-flex align-items-center gap-2">
+            {#if totalUnassignedCLO != 0}
+              <span class="badge text-bg-warning" title="CLOs not used by any lesson"
+                >Unassigned:<i class="fa-solid fa-triangle-exclamation"></i> {totalUnassignedCLO}</span
               >
-                {CAT_LABEL[cat]}
-                <span class="badge text-bg-light ms-2">{countByCatCLO.get(cat) || 0}</span>
-                {#if unassignedCountByCatCLO.get(cat) != 0}
-                  <span class="badge text-bg-warning ms-1">{unassignedCountByCatCLO.get(cat) || 0}</span>
-                {/if}
-              </button>
-            {/each}
+            {/if}
+            <div class="btn-group btn-group-sm" role="tablist" aria-label="CLO categories">
+              {#each CAT_ORDER as cat}
+                <button
+                  type="button"
+                  class={"btn " + (activeTabCLO === cat ? "btn-primary" : "btn-outline-primary")}
+                  aria-selected={activeTabCLO === cat}
+                  aria-controls={`clo-tab-${cat}`}
+                  on:click={() => (activeTabCLO = cat)}
+                >
+                  {CAT_LABEL[cat]}
+                  <span class="badge text-bg-light ms-2">{countByCatCLO.get(cat) || 0}</span>
+                  {#if unassignedCountByCatCLO.get(cat) != 0}
+                    <span class="badge text-bg-warning ms-1">{unassignedCountByCatCLO.get(cat) || 0}</span>
+                  {/if}
+                </button>
+              {/each}
+            </div>
           </div>
         </div>
       </div>
@@ -704,7 +923,7 @@
                       title="Drag to a lesson to add"
                     >
                       <div class="d-flex align-items-center gap-2">
-                        {#if !usedCloKeySet.has(`${o.normCat}::${o.text}`)}
+                        {#if !usedCloIdSet.has(o.id)}
                           <span class="badge bg-warning text-dark"
                             ><i class="fa-solid fa-triangle-exclamation"></i></span
                           >
@@ -713,10 +932,12 @@
                         <span>{o.text}</span>
                       </div>
                       <div class="btn-group btn-group-sm">
-                        <button class="btn btn-outline-info me-2" on:click={() => openEditCloModal(o)}
-                          ><i class="fa-solid fa-pen-to-square"></i></button
+                        <button
+                          class="btn btn-outline-info me-2"
+                          aria-label="button"
+                          on:click={() => openEditCloModal(o)}><i class="fa-solid fa-pen-to-square"></i></button
                         >
-                        <button class="btn btn-outline-danger" on:click={() => deleteClo(o)}
+                        <button class="btn btn-outline-danger" aria-label="button" on:click={() => deleteClo(o)}
                           ><i class="fa-solid fa-trash"></i></button
                         >
                       </div>
@@ -732,99 +953,272 @@
         {/each}
       </div>
     </div>
-
-    <!-- Modules & Lessons -->
-    <div class="d-flex align-items-center justify-content-between mb-2">
-      <h2 class="h5 mb-0">Modules & Lessons</h2>
-      <small class="text-muted">{modules.length} modules • {lessons.length} lessons</small>
-    </div>
-
-    {#if loading}
-      <div class="text-center py-5">
-        <div class="spinner-border" role="status"><span class="visually-hidden">Loading…</span></div>
+    <div class="col-6">
+      <!-- Modules & Lessons -->
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <h2 class="h5 mb-0">Modules & Lessons</h2>
+        <small class="text-muted">{modules.length} modules • {lessons.length} lessons</small>
       </div>
-    {:else}
-      {#each modules as m}
-        <div class="card mb-3">
-          <div class="card-header d-flex justify-content-between align-items-center">
-            <div class="d-flex align-items-center gap-2">
-              <strong>{moduleHeading(m)}</strong>
-            </div>
-            <div class="d-flex align-items-center gap-2">
-              <button class="btn btn-sm btn-outline-success" on:click={() => openAddLessonModal(m.id)}>+ Lesson</button>
-              <button class="btn btn-sm btn-outline-info" title="Edit module" on:click={() => openEditModuleModal(m)}
-                ><i class="fa-solid fa-pen-to-square"></i></button
-              >
-              <button class="btn btn-sm btn-outline-danger" title="Delete module" on:click={() => deleteModule(m.id)}
-                ><i class="fa-solid fa-trash"></i></button
-              >
-              <small class="text-muted">Module ID: {m.id}</small>
-            </div>
-          </div>
 
-          <div class="card-body">
-            <!-- Lessons table -->
-            <div class="table-responsive">
-              <table class="table align-middle table-hover">
-                <thead class="table-light sticky-top">
-                  <tr>
-                    <th style="width:140px;">Lesson</th>
-                    <th>Topics</th>
-                    <th style="min-width:360px;">Learning Outcomes (drop here)</th>
-                    <th style="width:120px;" class="text-end">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {#each lessonsByModule.get(m.id) || [] as l}
-                    <tr>
-                      <td class="fw-semibold">{l.title}</td>
-                      <td class="text-muted">{l.topics}</td>
-                      <td on:dragover={onLessonDragOver} on:drop={(e) => onLessonDrop(e, l)}>
-                        <div class="d-flex flex-wrap gap-2">
-                          {#each l.los as lo}
-                            <span class="badge bg-info bg-opacity-50 d-flex align-items-center gap-1">
-                              <span class={"badge " + catBadgeClass(lo.normCat)}>{shortCat(lo.normCat)}</span>
-                              <span>{lo.text}</span>
-                              <button
-                                type="button"
-                                class="btn btn-sm btn-link p-0 ms-1 text-danger text-decoration-none"
-                                title="Remove from lesson"
-                                on:click={() => removeLoFromLesson(l, lo)}
-                                aria-label="Remove outcome"
-                              >
-                                ×
-                              </button>
-                            </span>
-                          {/each}
-                          {#if l.los.length === 0}
-                            <span class="text-muted small">Drop CLOs here</span>
-                          {/if}
-                        </div>
-                      </td>
-                      <td class="text-end">
-                        <div class="btn-group btn-group-sm">
-                          <button class="btn btn-outline-info me-2" on:click={() => openEditLessonModal(l)}
-                            ><i class="fa-solid fa-pen-to-square"></i></button
-                          >
-                          <button class="btn btn-outline-danger" on:click={() => deleteLesson(l)}
-                            ><i class="fa-solid fa-trash"></i></button
-                          >
-                        </div>
-                      </td>
-                    </tr>
-                  {/each}
-                  {#if (lessonsByModule.get(m.id) || []).length === 0}
-                    <tr><td colspan="4" class="text-muted fst-italic">No lessons in this module</td></tr>
-                  {/if}
-                </tbody>
-              </table>
-            </div>
-          </div>
+      {#if loading}
+        <div class="text-center py-5">
+          <div class="spinner-border" role="status"><span class="visually-hidden">Loading…</span></div>
         </div>
-      {/each}
-    {/if}
+      {:else}
+        <div class="scroll-modules">
+          {#if modules.length == 0}
+            <div class="card mb-3">
+              <div class="card-header d-flex justify-content-between align-items-center">No Modules configured</div>
+            </div>
+          {/if}
+          {#each modules as m}
+            <div class="card mb-3">
+              <div class="card-header d-flex justify-content-between align-items-center">
+                <div class="d-flex align-items-center gap-2">
+                  <strong>{moduleHeading(m)}</strong>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                  <button class="btn btn-sm btn-outline-success" on:click={() => openAddLessonModal(m.id)}
+                    >+ Lesson</button
+                  >
+                  <button
+                    class="btn btn-sm btn-outline-info"
+                    title="Edit module"
+                    on:click={() => openEditModuleModal(m)}
+                    aria-label="button"><i class="fa-solid fa-pen-to-square"></i></button
+                  >
+                  <button
+                    class="btn btn-sm btn-outline-danger"
+                    title="Delete module"
+                    on:click={() => deleteModule(m.id)}
+                    aria-label="button"><i class="fa-solid fa-trash"></i></button
+                  >
+                  <small class="text-muted">Module ID: {m.id}</small>
+                </div>
+              </div>
+
+              <div class="card-body">
+                <!-- Lessons table -->
+                <div class="table-responsive">
+                  <table class="table align-middle table-hover">
+                    <thead class="table-light sticky-top">
+                      <tr>
+                        <th style="width:140px;">Lesson</th>
+                        <th>Topics</th>
+                        <th style="min-width:360px;">Learning Outcomes (drop here)</th>
+                        <th style="width:120px;" class="text-end">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {#each lessonsByModule.get(m.id) || [] as l}
+                        <tr>
+                          <td class="fw-semibold">{l.title}</td>
+                          <td class="text-muted">{l.topics}</td>
+                          <td on:dragover={onLessonDragOver} on:drop={(e) => onLessonDrop(e, l)}>
+                            <div class="d-flex flex-wrap gap-2">
+                              {#each l.los as lo}
+                                <span class="badge bg-info bg-opacity-50 d-flex align-items-center gap-1">
+                                  <span class={"badge " + catBadgeClass(lo.normCat)}>{shortCat(lo.normCat)}</span>
+                                  <span>{lo.text}</span>
+                                  <button
+                                    type="button"
+                                    class="btn btn-sm btn-link p-0 ms-1 text-danger text-decoration-none"
+                                    title="Remove from lesson"
+                                    on:click={() => removeLoFromLesson(l, lo)}
+                                    aria-label="Remove outcome"
+                                  >
+                                    ×
+                                  </button>
+                                </span>
+                              {/each}
+                              {#if l.los.length === 0}
+                                <span class="text-muted small">Drop CLOs here</span>
+                              {/if}
+                            </div>
+                          </td>
+                          <td class="text-end">
+                            <div class="btn-group btn-group-sm">
+                              <button
+                                class="btn btn-outline-info me-2"
+                                aria-label="button"
+                                on:click={() => openEditLessonModal(l)}
+                                ><i class="fa-solid fa-pen-to-square"></i></button
+                              >
+                              <button
+                                class="btn btn-outline-danger"
+                                on:click={() => deleteLesson(l)}
+                                aria-label="button"><i class="fa-solid fa-trash"></i></button
+                              >
+                            </div>
+                          </td>
+                        </tr>
+                      {/each}
+                      {#if (lessonsByModule.get(m.id) || []).length === 0}
+                        <tr><td colspan="4" class="text-muted fst-italic">No lessons in this module</td></tr>
+                      {/if}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </div>
   {/if}
 </div>
+
+<!-- ====== Course Manager Modal ====== -->
+{#if showCourseManager}
+  <div class="modal fade show d-block" tabindex="-1" role="dialog" aria-modal="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content modal-background">
+        <div class="modal-header">
+          <h5 class="modal-title">Manage Courses (Program #{programId})</h5>
+          <button class="btn-close" on:click={() => (showCourseManager = false)} aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <small class="text-muted">{courses.length} course(s)</small>
+            <button class="btn btn-sm btn-outline-primary" aria-label="button" on:click={openAddCourseModal}>
+              <i class="fa-solid fa-plus"></i>
+            </button>
+          </div>
+
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead class="table-light">
+                <tr>
+                  <th style="width:80px;">ID</th>
+                  <th>Name</th>
+                  <th style="width:120px;">Order</th>
+                  <th style="width:160px;" class="text-end">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each courses as c}
+                  <tr class={selectedCourseId === c.id ? "table-active" : ""}>
+                    <td>{c.id}</td>
+                    <td>{c.name}</td>
+                    <td>{c.order ?? "-"}</td>
+                    <td class="text-end">
+                      <div class="btn-group btn-group-sm">
+                        <button
+                          class="btn btn-outline-secondary me-2"
+                          title="Select"
+                          aria-label="button"
+                          on:click={() => selectCourseByID(c.id)}
+                        >
+                          <i class="fa-solid fa-check"></i>
+                        </button>
+                        <button
+                          class="btn btn-outline-info me-2"
+                          aria-label="button"
+                          title="Edit"
+                          on:click={() => openEditCourseModal(c)}
+                        >
+                          <i class="fa-solid fa-pen-to-square"></i>
+                        </button>
+                        <button
+                          class="btn btn-outline-danger"
+                          aria-label="button"
+                          title="Delete"
+                          on:click={() => deleteCourse(c)}
+                        >
+                          <i class="fa-solid fa-trash"></i>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                {/each}
+                {#if courses.length === 0}
+                  <tr><td colspan="4" class="text-muted fst-italic">No courses for this program yet.</td></tr>
+                {/if}
+              </tbody>
+            </table>
+          </div>
+          <small class="text-muted d-block mt-2">
+            Tip: “Order” controls the sort in the dropdown. Leave blank to push to the bottom (by ID).
+          </small>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" on:click={() => (showCourseManager = false)}>Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="modal-backdrop fade show"></div>
+{/if}
+
+<!-- ====== Add/Edit Course Modal ====== -->
+{#if showAddCourseModal}
+  <div class="modal fade show d-block" tabindex="-1" role="dialog" aria-modal="true">
+    <div class="modal-dialog">
+      <div class="modal-content modal-background border border-secondary">
+        <div class="modal-header">
+          <h5 class="modal-title">{editingCourse ? `Edit Course #${editingCourse.id}` : "Add Course"}</h5>
+          <button class="btn-close" on:click={() => (showAddCourseModal = false)} aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          {#if courseError}<div class="alert alert-danger">{courseError}</div>{/if}
+
+          <div class="mb-3">
+            <label class="form-label" for="course-name">Course name</label>
+            <input
+              class="form-control"
+              type="text"
+              id="course-name"
+              bind:value={courseName}
+              placeholder="e.g., Programming 1"
+              disabled={courseSaving}
+            />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" for="about-the-course">About the course</label>
+            <textarea
+              class="form-control"
+              id="about-the-course"
+              bind:value={about_the_course}
+              placeholder="e.g., This course covers…"
+              disabled={courseSaving}
+            ></textarea>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" for="order">Order (optional)</label>
+            <input
+              class="form-control"
+              id="order"
+              type="number"
+              bind:value={courseOrder}
+              placeholder="e.g., 1, 2, 3…"
+              disabled={courseSaving}
+            />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button
+            class="btn btn-secondary"
+            aria-label="button"
+            on:click={() => (showAddCourseModal = false)}
+            disabled={courseSaving}
+          >
+            <i class="fa-solid fa-cancel"></i>
+          </button>
+          <button class="btn btn-primary" on:click={saveCourse} disabled={courseSaving}>
+            {#if courseSaving}
+              Saving…
+            {:else}
+              <i class="fa-solid fa-floppy-disk"></i>
+            {/if}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="modal-backdrop fade show"></div>
+{/if}
 
 <!-- ====== Add/Edit Course Outcome Modal ====== -->
 {#if showAddCloModal}
@@ -841,8 +1235,8 @@
           {#if cloError}<div class="alert alert-danger">{cloError}</div>{/if}
 
           <div class="mb-3">
-            <label class="form-label">Category</label>
-            <select class="form-select" bind:value={cloCat} disabled={cloSaving}>
+            <label class="form-label" for="categoty-select">Category</label>
+            <select class="form-select" bind:value={cloCat} id="category-select" disabled={cloSaving}>
               <option value="KNOWLEDGE">Knowledge</option>
               <option value="SKILL">Skill</option>
               <option value="GENERAL_COMPETENCE">General Competence</option>
@@ -850,9 +1244,10 @@
           </div>
 
           <div class="mb-3">
-            <label class="form-label">Outcome text</label>
+            <label class="form-label" for="outome-text">Outcome text</label>
             <textarea
               class="form-control"
+              id="outcome-text"
               rows="4"
               bind:value={cloName}
               placeholder="Describe the learning outcome…"
@@ -894,9 +1289,10 @@
           {#if lessonError}<div class="alert alert-danger">{lessonError}</div>{/if}
 
           <div class="mb-3">
-            <label class="form-label">Lesson title</label>
+            <label class="form-label" for="lesson-title">Lesson title</label>
             <input
               class="form-control"
+              id="lesson-title"
               type="text"
               bind:value={lessonName}
               placeholder="e.g., Lesson 1"
@@ -905,10 +1301,11 @@
           </div>
 
           <div class="mb-3">
-            <label class="form-label">Topics (optional)</label>
+            <label class="form-label" for="topics">Topics (optional)</label>
             <textarea
               class="form-control"
               rows="3"
+              id="topics"
               bind:value={lessonTopics}
               placeholder="Short description"
               disabled={lessonSaving}
@@ -944,10 +1341,11 @@
           {#if moduleError}<div class="alert alert-danger">{moduleError}</div>{/if}
 
           <div class="mb-3">
-            <label class="form-label">Module name (optional)</label>
+            <label class="form-label" for="module-name">Module name (optional)</label>
             <input
               class="form-control"
               type="text"
+              id="module-name"
               bind:value={moduleName}
               placeholder="Internal name"
               disabled={moduleSaving}
@@ -955,10 +1353,11 @@
           </div>
 
           <div class="mb-3">
-            <label class="form-label">Module title (optional)</label>
+            <label class="form-label" for="module-title">Module title (optional)</label>
             <input
               class="form-control"
               type="text"
+              id="module-title"
               bind:value={moduleTitle}
               placeholder="Title shown to users"
               disabled={moduleSaving}
@@ -966,10 +1365,11 @@
           </div>
 
           <div class="mb-3">
-            <label class="form-label">Order (optional)</label>
+            <label class="form-label" for="module-order">Order (optional)</label>
             <input
               class="form-control"
               type="number"
+              id="module-order"
               bind:value={moduleOrder}
               placeholder="e.g., 1, 2, 3…"
               disabled={moduleSaving}
@@ -991,8 +1391,12 @@
 {/if}
 
 <style>
+  .modal-background {
+    background: #3f4449;
+    color: white;
+  }
   .tab-scroll {
-    max-height: 360px;
+    max-height: 550px;
     overflow: auto;
   }
   .card-body .table-responsive {
@@ -1017,5 +1421,10 @@
   }
   .badge.bg-outline .btn.btn-link {
     line-height: 1;
+  }
+  .scroll-modules {
+    max-height: 585px; /* adjust to the size you want */
+    overflow-y: auto; /* vertical scrollbar */
+    padding-right: 4px; /* space so scrollbar doesn’t cover content */
   }
 </style>

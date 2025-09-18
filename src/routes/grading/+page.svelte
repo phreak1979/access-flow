@@ -103,6 +103,7 @@
   async function loadClassTotals(studentClass: Totals | null | string) {
     if (!studentClass) {
       classTotals = new Map();
+
       return;
     }
     try {
@@ -120,12 +121,14 @@
   }
 
   async function loadCourseProfile(programId: number) {
+    console.warn("DEBUGPRINT[125]: +page.svelte:123: programId=", programId);
     const res = await fetch(
       `${API_URL}/items/courseprofile?fields=*,user_updated.first_name,user_updated.last_name&sort[]=-id&filter[program]=${programId}`,
       { headers: { "Content-Type": "application/json", Authorization: `Bearer ${TOKEN}` } },
     );
     const { data } = await res.json();
     courseProfile = data ?? [];
+    console.warn("DEBUGPRINT[124]: +page.svelte:128: courseProfile=", courseProfile);
     selectedProfile = courseProfile[0]?.id;
     courseDict = courseProfile[0]?.profile ?? {};
   }

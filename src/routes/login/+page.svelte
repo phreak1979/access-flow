@@ -1,11 +1,14 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
+  import { alert, toast, confirm } from "$lib/alert";
 
   export let data: { API_URL: string };
   const API_URL: string = data.API_URL;
+
   let email = "";
   let password = "";
   let error: string | null = null;
+  let logginIn: boolean = false;
 
   async function handleLogin(event: SubmitEvent) {
     event.preventDefault();
@@ -19,6 +22,9 @@
 
       if (!res.ok) {
         const err = await res.json();
+        await alert("Login failed, username or password error...", "error", "Failed!");
+        logginIn = false;
+
         throw new Error(err.errors?.[0]?.message || "Login failed");
       }
 
@@ -33,6 +39,7 @@
       // Redirect to home (or wherever you want)
       goto("/home");
     } catch (e: unknown) {
+      logginIn = false;
       error = e instanceof Error ? e.message : "Unexpected error";
     }
   }
@@ -76,7 +83,11 @@
           <label class="form-check-label fw-500" for="customCheck1">Remember me</label>
         </div>
       </div>
-      <button type="submit" class="btn btn-info btn-lg d-block w-100 mb-3 border border-info">SIGN IN</button>
+      <button
+        type="submit"
+        class="btn btn-info btn-lg d-block w-100 mb-3 border border-info"
+        on:click={() => (logginIn = true)}>{logginIn ? "Logging in..." : "Sign in"}</button
+      >
       <div class="text-center text-body text-opacity-50" hidden>
         Don't have an account yet? <a href="page_register.html">Sign up</a>.
       </div>
